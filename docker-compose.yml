@@ -1,0 +1,102 @@
+version: '2'
+
+services:
+  rocketchat:
+    image: rocketchat/rocket.chat:latest
+    restart: unless-stopped
+    volumes:
+      - ./rocketchat/uploads:/app/uploads
+    environment:
+      - PORT=3000
+      - ROOT_URL=http://chat.example.com
+      - MONGO_URL=mongodb://mongo:27017/rocketchat
+      - MONGO_OPLOG_URL=mongodb://mongo:27017/local
+      - MAIL_URL=smtp://smtp.email
+      - VIRTUAL_HOST=chat.example.com
+      - LETSENCRYPT_HOST=chat.example.com
+      - LETSENCRYPT_EMAIL=email@example.com
+    depends_on:
+      - mongo
+  wordpress:
+    image: wordpress:apache
+    links:
+      - "mariadb:mysql"
+    volumes:
+      - ./wordpress:/var/www/html
+    environment:
+      - WORDPRESS_DB_HOST=mysql
+      - WORDPRESS_DB_USER=wordpress
+      - WORDPRESS_DB_PASSWORD=awordpressuser
+      - WORDPRESS_DB_NAME=wordpress
+      - VIRTUAL_HOST=example.com
+      - LETSENCRYPT_HOST=example.com
+      - LETSENCRYPT_EMAIL=email@example.com
+  mongo:
+    image: mongo:3.2
+    restart: unless-stopped
+    volumes:
+     - ./mongo:/data/db
+    command: mongod --smallfiles --oplogSize 128 --replSet rs0
+  mongo-init-replica:
+    image: mongo:3.2
+    command: 'mongo mongo/rocketchat --eval "rs.initiate({ _id: ''rs0'', members: [ { _id: 0, host: ''localhost:27017'' } ]})"'
+    depends_on:
+      - mongo
+  portainer:
+    image: portainer/portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer:/data
+    environment:
+      - VIRTUAL_HOST=portainer.example.com
+      - LETSENCRYPT_HOST=portainer.example.com
+      - LETSENCRYPT_EMAIL=email@example.com
+  myadmin:
+    image: phpmyadmin/phpmyadmin
+    links:
+      - "mariadb:db"
+    environment:
+      - VIRTUAL_HOST=pma.example.com
+      - LETSENCRYPT_HOST=pma.example.com
+      - LETSENCRYPT_EMAIL=email@example.com
+  mariadb:
+    image: mariadb:latest
+    command: mysqld --innodb-buffer-pool-size=20M
+    environment:
+      - MYSQL_ROOT_PASSWORD=amasterpassword
+      - MYSQL_DATABASE=gogs
+      - MYSQL_USER=gogs
+      - MYSQL_PASSWORD=agogsuser
+    volumes:
+      - "./mariadb:/var/lib/mysql:rw"
+  gogs:
+    image: gogs/gogs
+    links:
+      - "mariadb:db"
+    expose:
+      - "3000"
+    volumes:
+      - ./gogs:/data
+    environment:
+      - VIRTUAL_HOST=git.example.com
+      - VIRTUAL_PORT=3000
+      - LETSENCRYPT_HOST=git.example.com
+      - LETSENCRYPT_EMAIL=email@example.com
+  registry:
+    image: registry:latest
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "./nginx/vhost.d:/etc/nginx/vhost.d"
+      - "./nginx/html:/usr/share/nginx/html"
+      - "/var/run/docker.sock:/tmp/docker.sock:ro"
+      - "./nginx/certs:/etc/nginx/certs"
+  letsencrypt-nginx-proxy-companion:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    volumes_from:
+      - "nginx-proxy"
